@@ -20,14 +20,14 @@ Steps:
    reported.
 
 2. **Check if the issue has been fixed** &mdash; try to reproduce it using the
-   `master` branch in the repository.
+   `main` branch in the repository.
 
 3. **Isolate the real problem** &mdash; make sure the issue is really a bug in
    Ransack and not in your code or another gem.
 
 4. **Report the issue** by providing the link to a self-contained
-   gist like [this](https://gist.github.com/jonatack/63048bc5062a84ba9e09) or
-   [this](https://gist.github.com/jonatack/5df41a0edb53b7bad989). Please use
+   gist like [this](https://github.com/activerecord-hackery/ransack/blob/main/bug_report_templates/test-ransack-scope-and-column-same-name.rb) or
+   [this](https://github.com/activerecord-hackery/ransack/blob/main/bug_report_templates/test-ransacker-arel-present-predicate.rb). Please use
    these code examples as a bug-report template for your Ransack issue!
 
 If you do not provide a self-contained gist and would like your issue to be reviewed, do provide at a minimum:
@@ -64,68 +64,85 @@ Here's a quick guide:
 2. Create a thoughtfully-named branch for your changes (`git checkout -b my-new-feature`).
 
 3. Install the development dependencies by running `bundle install`.
-   To install rails other than latest (set in Gemfile): `RAILS='5-2-stable' bundle install`
-
-        $ RAILS='5-2-stable' bundle install
+   To install rails other than latest (set in Gemfile): `RAILS='6-1-stable' bundle install`
 
 4. Begin by running the tests. We only take pull requests with passing tests,
    and it's great to know that you have a clean slate:
 
-        $ bundle exec rake spec
+   ```sh
+   bundle exec rake spec
+   ```
 
    The test suite runs by default with SQLite3. To run the test suite with PostgreSQL or MySQL, use:
 
-        $ DB=pg bundle exec rake spec (`DB=postgres` & `DB=postgresql` work too)
-        $ DB=mysql bundle exec rake spec
+   ```sh
+   DB=pg bundle exec rake spec
+   DB=mysql bundle exec rake spec
+   ```
+   
+   A one-liner to run all three
+   
+   ```sh
+   bundle exec rake spec && DB=pg bundle exec rake spec && DB=mysql bundle exec rake spec
+   ```
 
    For Postgres and MySQL, databases are expected to exist, called 'ransack'. To create use these commands (assuming OS X and Homebrew):
 
    ### Postgres
-       $ createdb ransack 
+   
+   ```sh
+   createdb ransack 
+   ```
 
    ### MySQL
-       $ mysql -u root
-       mysql> create database ransack;     
+   
+   ```sh
+   mysql -u root
+   mysql> create database ransack; 
+   ```
 
    The test suite runs by default
 
    To run only the tests in a particular file: `bundle exec rspec <path/to/filename>`
 
-        $ bundle exec rspec spec/ransack/search_spec.rb
+   ```sh
+   bundle exec rspec spec/ransack/search_spec.rb
+   ```
 
    To run a single test in that file: `bundle exec rspec <path/to/filename> -e "test name"`
 
-        $ bundle exec rspec spec/ransack/search_spec.rb -e "accepts a context option"
+   ```sh
+   bundle exec rspec spec/ransack/search_spec.rb -e "accepts a context option"
+   ```
 
-5. Hack away! Please use Ruby features that are compatible down to Ruby 2.3.
-   Since version 2.3.1, Ransack no longer maintains Ruby 2.2 compatibility.
-
-6. Add tests for your changes. Only refactoring and documentation changes
+5. Add tests for your changes. Only refactoring and documentation changes
    require no new tests. If you are adding functionality or fixing a bug, we
    need a test!
 
-7. Make the tests pass.
+6. Make the tests pass.
 
-8. Update the Change Log. If you are adding new functionality, document it in
+7. Update the Change Log. If you are adding new functionality, document it in
    the README.
 
-9. Make sure git knows your name and email address in your `~/.gitconfig` file:
+8. Make sure git knows your name and email address in your `~/.gitconfig` file:
 
-        $ git config --global user.name "Your Name"
-        $ git config --global user.email "contributor@example.com"
+   ```sh
+   git config --global user.name "Your Name"
+   git config --global user.email "contributor@example.com"
+   ```
 
-10. Commit your changes (`git commit -am 'Add feature/fix bug/improve docs'`).
-   If your pull request only contains documentation changes, please remember
-   to add `[skip ci]` to the beginning of your commit message so the Travis
-   test suite doesn't :runner: needlessly.
+9. Commit your changes (`git commit -am 'Add feature/fix bug/improve docs'`).
+    If your pull request only contains documentation changes, please remember
+    to add `[skip ci]` to the beginning of your commit message so the CI
+    test suite doesn't :runner: needlessly.
 
-11. If necessary, rebase your commits into logical chunks, without errors. To
+10. If necessary, rebase your commits into logical chunks, without errors. To
    interactively rebase and cherry-pick from, say, the last 10 commits:
    `git rebase -i HEAD~10`, then `git push -f`.
 
-12. Push the branch up to your fork on GitHub
+11. Push the branch up to your fork on GitHub
    (`git push origin my-new-feature`) and from GitHub submit a pull request to
-   Ransack's `master` branch.
+   Ransack's `main` branch.
 
 At this point you're waiting on us. We like to at least comment on, if not
 accept, pull requests within three business days (and, typically, one business
@@ -134,7 +151,7 @@ day). We may suggest some changes or improvements or alternatives.
 Some things that will increase the chance that your pull request is accepted:
 
 * Include tests that fail without your code, and pass with it.
-* Update the README, the change log, the wiki documentation... anything that is
+* Update the README, the change log, the documentation... anything that is
   affected by your contribution.
 * Use idiomatic Ruby and follow the syntax conventions below.
 

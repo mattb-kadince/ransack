@@ -8,7 +8,6 @@ module Ransack
         subject { ::ActiveRecord::Base }
 
         it { should respond_to :ransack }
-        it { should respond_to :search }
 
         describe '#search' do
           subject { Person.ransack }
@@ -44,12 +43,12 @@ module Ransack
 
             it 'applies stringy boolean scopes with true value in an array' do
               s = Person.ransack('of_age' => ['true'])
-              expect(s.result.to_sql).to (include 'age >= 18')
+              expect(s.result.to_sql).to (include rails7_and_mysql ? %q{(age >= '18')} : 'age >= 18')
             end
 
             it 'applies stringy boolean scopes with false value in an array' do
               s = Person.ransack('of_age' => ['false'])
-              expect(s.result.to_sql).to (include 'age < 18')
+              expect(s.result.to_sql).to (include rails7_and_mysql ? %q{age < '18'} : 'age < 18')
             end
 
             it 'ignores unlisted scopes' do
@@ -69,13 +68,23 @@ module Ransack
 
             it 'passes values to scopes' do
               s = Person.ransack('over_age' => 18)
-              expect(s.result.to_sql).to (include 'age > 18')
+              expect(s.result.to_sql).to (include rails7_and_mysql ? %q{age > '18'} : 'age > 18')
             end
 
             it 'chains scopes' do
               s = Person.ransack('over_age' => 18, 'active' => true)
-              expect(s.result.to_sql).to (include 'age > 18')
+              expect(s.result.to_sql).to (include rails7_and_mysql ? %q{age > '18'} : 'age > 18')
               expect(s.result.to_sql).to (include 'active = 1')
+            end
+
+            it 'applies scopes that define string SQL joins' do
+              allow(Article)
+                .to receive(:ransackable_scopes)
+                .and_return([:latest_comment_cont])
+
+              # Including a negative condition to test removing the scope
+              s = Search.new(Article, notes_note_not_eq: 'Test', latest_comment_cont: 'Test')
+              expect(s.result.to_sql).to include 'latest_comment'
             end
 
             context "with sanitize_custom_scope_booleans set to false" do
@@ -89,12 +98,12 @@ module Ransack
 
               it 'passes true values to scopes' do
                 s = Person.ransack('over_age' => 1)
-                expect(s.result.to_sql).to (include 'age > 1')
+                expect(s.result.to_sql).to (include rails7_and_mysql ? %q{age > '1'} : 'age > 1')
               end
 
               it 'passes false values to scopes'  do
                 s = Person.ransack('over_age' => 0)
-                expect(s.result.to_sql).to (include 'age > 0')
+                expect(s.result.to_sql).to (include rails7_and_mysql ? %q{age > '0'} : 'age > 0')
               end
             end
 
@@ -107,12 +116,12 @@ module Ransack
 
               it 'passes true values to scopes' do
                 s = Person.ransack('over_age' => 1)
-                expect(s.result.to_sql).to (include 'age > 1')
+                expect(s.result.to_sql).to (include rails7_and_mysql ? %q{age > '1'} : 'age > 1')
               end
 
               it 'passes false values to scopes'  do
                 s = Person.ransack('over_age' => 0)
-                expect(s.result.to_sql).to (include 'age > 0')
+                expect(s.result.to_sql).to (include  rails7_and_mysql ? %q{age > '0'} : 'age > 0')
               end
             end
 
@@ -122,9 +131,29 @@ module Ransack
             expect { Person.ransack('') }.to_not raise_error
           end
 
+          it 'raises exception if ransack! called with unknown condition' do
+            expect { Person.ransack!(unknown_attr_eq: 'Ernie') }.to raise_error(ArgumentError)
+          end
+
           it 'does not modify the parameters' do
             params = { name_eq: '' }
             expect { Person.ransack(params) }.not_to change { params }
+          end
+        end
+
+        context 'has_one through associations' do
+          let(:address)  { Address.create!(city: 'Boston') }
+          let(:org) { Organization.create!(name: 'Testorg', address: address) }
+          let!(:employee) { Employee.create!(name: 'Ernie', organization: org) }
+
+          it 'works when has_one through association is first' do
+            s = Employee.ransack(address_city_eq: 'Boston', organization_name_eq: 'Testorg')
+            expect(s.result.to_a).to include(employee)
+          end
+
+          it 'works when has_one through association is last' do
+            s = Employee.ransack(organization_name_eq: 'Testorg', address_city_eq: 'Boston')
+            expect(s.result.to_a).to include(employee)
           end
         end
 
@@ -265,10 +294,12 @@ module Ransack
           # end
 
           it 'creates ransack attributes' do
+            person = Person.create!(name: 'Aric Smith')
+
             s = Person.ransack(reversed_name_eq: 'htimS cirA')
             expect(s.result.size).to eq(1)
 
-            expect(s.result.first).to eq Person.where(name: 'Aric Smith').first
+            expect(s.result.first).to eq person
           end
 
           it 'can be accessed through associations' do
@@ -308,7 +339,11 @@ module Ransack
           end
 
           it 'should function correctly with a multi-parameter attribute' do
-            ::ActiveRecord::Base.default_timezone = :utc
+            if ::ActiveRecord::VERSION::MAJOR >= 7
+              ::ActiveRecord.default_timezone = :utc
+            else
+              ::ActiveRecord::Base.default_timezone = :utc
+            end
             Time.zone = 'UTC'
 
             date = Date.current
@@ -458,9 +493,9 @@ module Ransack
               Comment.create(article: Article.create(title: 'Avenger'), person: Person.create(salary: 100_000)),
               Comment.create(article: Article.create(title: 'Avenge'), person: Person.create(salary: 50_000)),
             ]
-            expect(Comment.ransack(article_title_cont: 'aven',s: 'person_salary desc').result).to eq(comments)
+            expect(Comment.ransack(article_title_cont: 'aven', s: 'person_salary desc').result).to eq(comments)
             expect(Comment.joins(:person).ransack(s: 'persons_salarydesc', article_title_cont: 'aven').result).to eq(comments)
-            expect(Comment.joins(:person).ransack(article_title_cont: 'aven',s: 'persons_salary desc').result).to eq(comments)
+            expect(Comment.joins(:person).ransack(article_title_cont: 'aven', s: 'persons_salary desc').result).to eq(comments)
           end
 
           it 'allows sort by `only_sort` field' do
@@ -538,7 +573,6 @@ module Ransack
                 quote_column_name("only_admin")} = 'htimS cirA'/
             )
           end
-
 
           it 'should allow passing ransacker arguments to a ransacker' do
             s = Person.ransack(
@@ -639,6 +673,37 @@ module Ransack
             it { should_not include 'only_sort' }
             it { should include 'only_admin' }
           end
+
+          context 'when not defined in model, nor in ApplicationRecord' do
+            subject { Article.ransackable_attributes }
+
+            it "raises a helpful error" do
+              without_application_record_method(:ransackable_attributes) do
+                expect { subject }.to raise_error(RuntimeError, /Ransack needs Article attributes explicitly allowlisted/)
+              end
+            end
+          end
+
+          context 'when defined only in model by delegating to super' do
+            subject { Article.ransackable_attributes }
+
+            around do |example|
+              Article.singleton_class.define_method(:ransackable_attributes) do
+                super(nil) - super(nil)
+              end
+
+              example.run
+            ensure
+              Article.singleton_class.remove_method(:ransackable_attributes)
+            end
+
+            it "returns the allowlist in the model, and warns" do
+              without_application_record_method(:ransackable_attributes) do
+                expect { subject }.to output(/Ransack's builtin `ransackable_attributes` method is deprecated/).to_stderr
+                expect(subject).to be_empty
+              end
+            end
+          end
         end
 
         describe '#ransortable_attributes' do
@@ -671,6 +736,37 @@ module Ransack
           it { should include 'parent' }
           it { should include 'children' }
           it { should include 'articles' }
+
+          context 'when not defined in model, nor in ApplicationRecord' do
+            subject { Article.ransackable_associations }
+
+            it "raises a helpful error" do
+              without_application_record_method(:ransackable_associations) do
+                expect { subject }.to raise_error(RuntimeError, /Ransack needs Article associations explicitly allowlisted/)
+              end
+            end
+          end
+
+          context 'when defined only in model by delegating to super' do
+            subject { Article.ransackable_associations }
+
+            around do |example|
+              Article.singleton_class.define_method(:ransackable_associations) do
+                super(nil) - super(nil)
+              end
+
+              example.run
+            ensure
+              Article.singleton_class.remove_method(:ransackable_associations)
+            end
+
+            it "returns the allowlist in the model, and warns" do
+              without_application_record_method(:ransackable_associations) do
+                expect { subject }.to output(/Ransack's builtin `ransackable_associations` method is deprecated/).to_stderr
+                expect(subject).to be_empty
+              end
+            end
+          end
         end
 
         describe '#ransackable_scopes' do
@@ -685,6 +781,21 @@ module Ransack
           it { should eq [] }
         end
 
+        private
+
+        def without_application_record_method(method)
+          ApplicationRecord.singleton_class.alias_method :"original_#{method}", :"#{method}"
+          ApplicationRecord.singleton_class.remove_method :"#{method}"
+
+          yield
+        ensure
+          ApplicationRecord.singleton_class.alias_method :"#{method}", :"original_#{method}"
+          ApplicationRecord.singleton_class.remove_method :"original_#{method}"
+        end
+
+        def rails7_and_mysql
+          ::ActiveRecord::VERSION::MAJOR >= 7 && ENV['DB'] == 'mysql'
+        end
       end
     end
   end

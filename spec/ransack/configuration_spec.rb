@@ -20,7 +20,7 @@ module Ransack
       Ransack.configure do |config|
         config.add_predicate(
           :test_predicate_without_compound,
-          :compounds => false
+          compounds: false
           )
       end
       expect(Ransack.predicates)
@@ -41,6 +41,20 @@ module Ransack
       Ransack.configure { |c| c.search_key = :query }
 
       expect(Ransack.options[:search_key]).to eq :query
+
+      Ransack.options = default
+    end
+
+    it 'should have default value for strip_whitespace' do
+      expect(Ransack.options[:strip_whitespace]).to eq true
+    end
+
+    it 'changes default search key parameter' do
+      default = Ransack.options.clone
+
+      Ransack.configure { |c| c.strip_whitespace = false }
+
+      expect(Ransack.options[:strip_whitespace]).to eq false
 
       Ransack.options = default
     end
@@ -124,8 +138,8 @@ module Ransack
       Ransack.configure do |config|
         config.add_predicate(
           :test_array_predicate,
-          :wants_array => true,
-          :compounds => true
+          wants_array: true,
+          compounds: true
           )
       end
 
@@ -139,11 +153,11 @@ module Ransack
         Ransack.configure do |config|
           config.add_predicate(
             :test_in_predicate,
-            :arel_predicate => 'in'
+            arel_predicate: 'in'
           )
           config.add_predicate(
             :test_not_in_predicate,
-            :arel_predicate => 'not_in'
+            arel_predicate: 'not_in'
           )
         end
 
@@ -157,13 +171,13 @@ module Ransack
         Ransack.configure do |config|
           config.add_predicate(
             :test_in_predicate_no_array,
-            :arel_predicate => 'in',
-            :wants_array => false
+            arel_predicate: 'in',
+            wants_array: false
           )
           config.add_predicate(
             :test_not_in_predicate_no_array,
-            :arel_predicate => 'not_in',
-            :wants_array => false
+            arel_predicate: 'not_in',
+            wants_array: false
           )
         end
 
@@ -172,6 +186,16 @@ module Ransack
         expect(Ransack.predicates['test_not_in_predicate_no_array'].wants_array)
         .to eq false
       end
+    end
+
+    it "PG's sort option", if: ::ActiveRecord::Base.connection.adapter_name == "PostgreSQL" do
+      default = Ransack.options.clone
+
+      Ransack.configure { |c| c.postgres_fields_sort_option = :nulls_first }
+
+      expect(Ransack.options[:postgres_fields_sort_option]).to eq :nulls_first
+
+      Ransack.options = default
     end
   end
 end

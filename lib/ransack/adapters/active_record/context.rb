@@ -12,8 +12,9 @@ module Ransack
 
         def type_for(attr)
           return nil unless attr && attr.valid?
+          relation     = attr.arel_attribute.relation
           name         = attr.arel_attribute.name.to_s
-          table        = attr.arel_attribute.relation.table_name
+          table        = relation.respond_to?(:table_name) ? relation.table_name : relation.name
           schema_cache = self.klass.connection.schema_cache
           unless schema_cache.send(:data_source_exists?, table)
             raise "No table named #{table} exists."
@@ -42,6 +43,17 @@ module Ransack
               if scope_or_sort.is_a?(Symbol)
                 relation = relation.send(scope_or_sort)
               else
+                case Ransack.options[:postgres_fields_sort_option]
+                when :nulls_first
+                  scope_or_sort = scope_or_sort.direction == :asc ? Arel.sql("#{scope_or_sort.to_sql} NULLS FIRST") : Arel.sql("#{scope_or_sort.to_sql} NULLS LAST")
+                when :nulls_last
+                  scope_or_sort = scope_or_sort.direction == :asc ? Arel.sql("#{scope_or_sort.to_sql} NULLS LAST") : Arel.sql("#{scope_or_sort.to_sql} NULLS FIRST")
+                when :nulls_always_first
+                  scope_or_sort = Arel.sql("#{scope_or_sort.to_sql} NULLS FIRST")
+                when :nulls_always_last
+                  scope_or_sort = Arel.sql("#{scope_or_sort.to_sql} NULLS LAST")
+                end
+
                 relation = relation.order(scope_or_sort)
               end
             end
@@ -99,11 +111,7 @@ module Ransack
         def join_sources
           base, joins = begin
             alias_tracker = ::ActiveRecord::Associations::AliasTracker.create(self.klass.connection, @object.table.name, [])
-            constraints   = if ::Gem::Version.new(::ActiveRecord::VERSION::STRING) >= ::Gem::Version.new(Constants::RAILS_6_0)
-              @join_dependency.join_constraints(@object.joins_values, alias_tracker)
-            else
-              @join_dependency.join_constraints(@object.joins_values, @join_type, alias_tracker)
-            end
+            constraints   = @join_dependency.join_constraints(@object.joins_values, alias_tracker, @object.references_values)
 
             [
               Arel::SelectManager.new(@object.table),
@@ -130,6 +138,7 @@ module Ransack
             stashed.eql?(association)
           }
           @object.joins_values.delete_if { |jd|
+            jd.instance_variables.include?(:@join_root) &&
             jd.instance_variable_get(:@join_root).children.map(&:object_id) == [association.object_id]
           }
         end
@@ -270,11 +279,7 @@ module Ransack
           join_list = join_nodes + convert_join_strings_to_ast(relation.table, string_joins)
 
           alias_tracker = ::ActiveRecord::Associations::AliasTracker.create(self.klass.connection, relation.table.name, join_list)
-          join_dependency = if ::Gem::Version.new(::ActiveRecord::VERSION::STRING) >= ::Gem::Version.new(Constants::RAILS_6_0)
-            Polyamorous::JoinDependency.new(relation.klass, relation.table, association_joins, Arel::Nodes::OuterJoin)
-          else
-            Polyamorous::JoinDependency.new(relation.klass, relation.table, association_joins)
-          end
+          join_dependency = Polyamorous::JoinDependency.new(relation.klass, relation.table, association_joins, Arel::Nodes::OuterJoin)
           join_dependency.instance_variable_set(:@alias_tracker, alias_tracker)
           join_nodes.each do |join|
             join_dependency.send(:alias_tracker).aliases[join.left.name.downcase] = 1
@@ -301,22 +306,13 @@ module Ransack
         end
 
         def build_association(name, parent = @base, klass = nil)
-          if ::Gem::Version.new(::ActiveRecord::VERSION::STRING) >= ::Gem::Version.new(Constants::RAILS_6_0)
-            jd = Polyamorous::JoinDependency.new(
-              parent.base_klass,
-              parent.table,
-              Polyamorous::Join.new(name, @join_type, klass),
-              @join_type
-            )
-            found_association = jd.instance_variable_get(:@join_root).children.last
-          else
-            jd = Polyamorous::JoinDependency.new(
-              parent.base_klass,
-              parent.table,
-              Polyamorous::Join.new(name, @join_type, klass)
-            )
-            found_association = jd.instance_variable_get(:@join_root).children.last
-          end
+          jd = Polyamorous::JoinDependency.new(
+            parent.base_klass,
+            parent.table,
+            Polyamorous::Join.new(name, @join_type, klass),
+            @join_type
+          )
+          found_association = jd.instance_variable_get(:@join_root).children.last
 
           @associations_pot[found_association] = parent
 
@@ -325,7 +321,7 @@ module Ransack
           @join_dependency.instance_variable_get(:@join_root).children.push found_association
 
           # Builds the arel nodes properly for this association
-          @join_dependency.send(:construct_tables!, jd.instance_variable_get(:@join_root))
+          @tables_pot[found_association] = @join_dependency.construct_tables_for_association!(jd.instance_variable_get(:@join_root), found_association)
 
           # Leverage the stashed association functionality in AR
           @object = @object.joins(jd)
@@ -335,12 +331,13 @@ module Ransack
         def extract_joins(association)
           parent = @join_dependency.instance_variable_get(:@join_root)
           reflection = association.reflection
-          join_constraints = association.join_constraints(
-                                 parent.table,
-                                 parent.base_klass,
-                                 Arel::Nodes::OuterJoin,
-                                 @join_dependency.instance_variable_get(:@alias_tracker)
-                               )
+          join_constraints = association.join_constraints_with_tables(
+                               parent.table,
+                               parent.base_klass,
+                               Arel::Nodes::OuterJoin,
+                               @join_dependency.instance_variable_get(:@alias_tracker),
+                               @tables_pot[association]
+                             )
           join_constraints.to_a.flatten
         end
       end

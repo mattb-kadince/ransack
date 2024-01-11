@@ -3,6 +3,19 @@ require 'spec_helper'
 module Ransack
   module Nodes
     describe Condition do
+      context 'bug report #1245' do
+        it 'preserves tuple behavior' do
+          ransack_hash = {
+              m: 'and',
+              g: [
+                { title_type_in: ['["title 1", ""]'] }
+              ]
+            }
+
+          sql = Article.ransack(ransack_hash).result.to_sql
+          expect(sql).to include("IN (('title 1', ''))")
+        end
+      end
 
       context 'with an alias' do
         subject {
@@ -59,6 +72,30 @@ module Ransack
           end
 
           specify { expect(subject).to be_nil }
+        end
+      end
+
+      context 'with an empty predicate' do
+        subject {
+          Condition.extract(
+            Context.for(Person), 'full_name', Person.first.name
+          )
+        }
+
+        context "when default_predicate = nil" do
+          before do
+            Ransack.configure { |c| c.default_predicate = nil }
+          end
+
+          specify { expect(subject).to be_nil }
+        end
+
+        context "when default_predicate = 'eq'" do
+          before do
+            Ransack.configure { |c| c.default_predicate = 'eq' }
+          end
+
+          specify { expect(subject).to eq Condition.extract(Context.for(Person), 'full_name_eq', Person.first.name) }
         end
       end
     end

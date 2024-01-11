@@ -6,6 +6,8 @@ when 'mysql', 'mysql2'
   ActiveRecord::Base.establish_connection(
     adapter:  'mysql2',
     database: 'ransack',
+    username: ENV.fetch("MYSQL_USERNAME") { "root" },
+    password: ENV.fetch("MYSQL_PASSWORD") { "" },
     encoding: 'utf8'
   )
 when 'pg', 'postgres', 'postgresql'
@@ -26,7 +28,24 @@ else
   )
 end
 
-class Person < ActiveRecord::Base
+# This is just a test app with no sensitive data, so we explicitly allowlist all
+# attributes and associations for search. In general, end users should
+# explicitly authorize each model, but this shows a way to configure the
+# unrestricted default behavior of versions prior to Ransack 4.
+#
+class ApplicationRecord < ActiveRecord::Base
+  self.abstract_class = true
+
+  def self.ransackable_attributes(auth_object = nil)
+    authorizable_ransackable_attributes
+  end
+
+  def self.ransackable_associations(auth_object = nil)
+    authorizable_ransackable_associations
+  end
+end
+
+class Person < ApplicationRecord
   default_scope { order(id: :desc) }
   belongs_to :parent, class_name: 'Person', foreign_key: :parent_id
   has_many   :children, class_name: 'Person', foreign_key: :parent_id
@@ -85,7 +104,6 @@ class Person < ActiveRecord::Base
       )
   end
 
-
   ransacker :sql_literal_id do
     Arel.sql('people.id')
   end
@@ -108,12 +126,11 @@ class Person < ActiveRecord::Base
     Arel.sql(query)
   end
 
-
   def self.ransackable_attributes(auth_object = nil)
     if auth_object == :admin
-      super - ['only_sort']
+      authorizable_ransackable_attributes - ['only_sort']
     else
-      super - ['only_sort', 'only_admin']
+      authorizable_ransackable_attributes - ['only_sort', 'only_admin']
     end
   end
 
@@ -129,7 +146,7 @@ end
 class Musician < Person
 end
 
-class Article < ActiveRecord::Base
+class Article < ApplicationRecord
   belongs_to :person
   has_many :comments
   has_and_belongs_to_many :tags
@@ -138,12 +155,51 @@ class Article < ActiveRecord::Base
   alias_attribute :content, :body
 
   default_scope { where("'default_scope' = 'default_scope'") }
+  scope :latest_comment_cont, lambda { |msg|
+    join = <<-SQL
+      (LEFT OUTER JOIN (
+          SELECT
+            comments.*,
+            row_number() OVER (PARTITION BY comments.article_id ORDER BY comments.id DESC) AS rownum
+          FROM comments
+        ) AS latest_comment
+        ON latest_comment.article_id = article.id
+        AND latest_comment.rownum = 1
+      )
+    SQL
+    .squish
+
+    joins(join).where("latest_comment.body ILIKE ?", "%#{msg}%")
+  }
+
+  ransacker :title_type, formatter: lambda { |tuples|
+    title, type = JSON.parse(tuples)
+    Arel::Nodes::Grouping.new(
+      [
+        Arel::Nodes.build_quoted(title),
+        Arel::Nodes.build_quoted(type)
+      ]
+    )
+  } do |_parent|
+    articles = Article.arel_table
+    Arel::Nodes::Grouping.new(
+      %i[title type].map do |field|
+        Arel::Nodes::NamedFunction.new(
+          'COALESCE',
+          [
+            Arel::Nodes::NamedFunction.new('TRIM', [articles[field]]),
+            Arel::Nodes.build_quoted('')
+          ]
+        )
+      end
+    )
+  end
 end
 
 class StoryArticle < Article
 end
 
-class Recommendation < ActiveRecord::Base
+class Recommendation < ApplicationRecord
   belongs_to :person
   belongs_to :target_person, class_name: 'Person'
   belongs_to :article
@@ -161,19 +217,38 @@ module Namespace
   end
 end
 
-class Comment < ActiveRecord::Base
+class Comment < ApplicationRecord
   belongs_to :article
   belongs_to :person
 
   default_scope { where(disabled: false) }
 end
 
-class Tag < ActiveRecord::Base
+class Tag < ApplicationRecord
   has_and_belongs_to_many :articles
 end
 
-class Note < ActiveRecord::Base
+class Note < ApplicationRecord
   belongs_to :notable, polymorphic: true
+end
+
+class Account < ApplicationRecord
+  belongs_to :agent_account, class_name: "Account"
+  belongs_to :trade_account, class_name: "Account"
+end
+
+class Address < ApplicationRecord
+  has_one :organization
+end
+
+class Organization < ApplicationRecord
+  belongs_to :address
+  has_many :employees
+end
+
+class Employee < ApplicationRecord
+  belongs_to :organization
+  has_one :address, through: :organization
 end
 
 module Schema
@@ -234,6 +309,25 @@ module Schema
         t.integer  :target_person_id
         t.integer  :article_id
       end
+
+      create_table :accounts, force: true do |t|
+        t.belongs_to :agent_account
+        t.belongs_to :trade_account
+      end
+
+      create_table :addresses, force: true do |t|
+        t.string :city
+      end
+
+      create_table :organizations, force: true do |t|
+        t.string :name
+        t.integer :address_id
+      end
+
+      create_table :employees, force: true do |t|
+        t.string :name
+        t.integer :organization_id
+      end
     end
 
     10.times do
@@ -259,7 +353,7 @@ module Schema
 end
 
 module SubDB
-  class Base < ActiveRecord::Base
+  class Base < ApplicationRecord
     self.abstract_class = true
     establish_connection(
       adapter: 'sqlite3',

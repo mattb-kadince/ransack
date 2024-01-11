@@ -20,6 +20,44 @@ module Ransack
         Search.new(Person, name_eq: 'foobar')
       end
 
+      context 'whitespace stripping' do
+        context 'when whitespace_strip option is true' do
+          before do
+            Ransack.configure { |c| c.strip_whitespace = true }
+          end
+
+          it 'strips leading & trailing whitespace before building' do
+            expect_any_instance_of(Search).to receive(:build)
+            .with({ 'name_eq' => 'foobar' })
+            Search.new(Person, name_eq: '   foobar     ')
+          end
+        end
+
+        context 'when whitespace_strip option is false' do
+          before do
+            Ransack.configure { |c| c.strip_whitespace = false }
+          end
+
+          it 'doesn\'t strip leading & trailing whitespace before building' do
+            expect_any_instance_of(Search).to receive(:build)
+            .with({ 'name_eq' => '   foobar     ' })
+            Search.new(Person, name_eq: '   foobar     ')
+          end
+        end
+
+        it 'strips leading & trailing whitespace when strip_whitespace search parameter is true' do
+          expect_any_instance_of(Search).to receive(:build)
+          .with({ 'name_eq' => 'foobar' })
+          Search.new(Person, { name_eq: '   foobar     ' }, { strip_whitespace: true })
+        end
+
+        it 'doesn\'t strip leading & trailing whitespace when strip_whitespace search parameter is false' do
+          expect_any_instance_of(Search).to receive(:build)
+          .with({ 'name_eq' => '   foobar     ' })
+          Search.new(Person, { name_eq: '   foobar     ' }, { strip_whitespace: false })
+        end
+      end
+
       it 'removes empty suffixed conditions before building' do
         expect_any_instance_of(Search).to receive(:build).with({})
         Search.new(Person, name_eq_any: [''])
@@ -226,7 +264,7 @@ module Ransack
       context 'with an invalid condition' do
         subject { Search.new(Person, unknown_attr_eq: 'Ernie') }
 
-        context 'when ignore_unknown_conditions is false' do
+        context 'when ignore_unknown_conditions configuration option is false' do
           before do
             Ransack.configure { |c| c.ignore_unknown_conditions = false }
           end
@@ -234,18 +272,67 @@ module Ransack
           specify { expect { subject }.to raise_error ArgumentError }
         end
 
-        context 'when ignore_unknown_conditions is true' do
+        context 'when ignore_unknown_conditions configuration option is true' do
           before do
             Ransack.configure { |c| c.ignore_unknown_conditions = true }
           end
 
           specify { expect { subject }.not_to raise_error }
         end
+
+        subject(:with_ignore_unknown_conditions_false) {
+          Search.new(Person,
+            { unknown_attr_eq: 'Ernie' },
+            { ignore_unknown_conditions: false }
+          )
+        }
+
+        subject(:with_ignore_unknown_conditions_true) {
+          Search.new(Person,
+            { unknown_attr_eq: 'Ernie' },
+            { ignore_unknown_conditions: true }
+          )
+        }
+
+        context 'when ignore_unknown_conditions search parameter is absent' do
+          specify { expect { subject }.not_to raise_error }
+        end
+
+        context 'when ignore_unknown_conditions search parameter is false' do
+          specify { expect { with_ignore_unknown_conditions_false }.to raise_error ArgumentError }
+        end
+
+        context 'when ignore_unknown_conditions search parameter is true' do
+          specify { expect { with_ignore_unknown_conditions_true }.not_to raise_error }
+        end
       end
 
       it 'does not modify the parameters' do
         params = { name_eq: '' }
         expect { Search.new(Person, params) }.not_to change { params }
+      end
+
+      context "ransackable_scope" do
+        around(:each) do |example|
+          Person.define_singleton_method(:name_eq) do |name|
+            self.where(name: name)
+          end
+
+          begin
+            example.run
+          ensure
+            Person.singleton_class.undef_method :name_eq
+          end
+        end
+
+        it "is prioritized over base predicates" do
+          allow(Person).to receive(:ransackable_scopes)
+            .and_return(Person.ransackable_scopes + [:name_eq])
+
+          s = Search.new(Person, name_eq: "Johny")
+          expect(s.instance_variable_get(:@scope_args)["name_eq"]).to eq("Johny")
+          expect(s.base[:name_eq]).to be_nil
+        end
       end
 
     end
@@ -256,6 +343,9 @@ module Ransack
       }
       let(:children_people_name_field) {
         "#{quote_table_name("children_people")}.#{quote_column_name("name")}"
+      }
+      let(:notable_type_field) {
+        "#{quote_table_name("notes")}.#{quote_column_name("notable_type")}"
       }
       it 'evaluates conditions contextually' do
         s = Search.new(Person, children_name_eq: 'Ernie')
@@ -274,18 +364,10 @@ module Ransack
 
         real_query = remove_quotes_and_backticks(s.to_sql)
 
-        # if ::Gem::Version.new(::ActiveRecord::VERSION::STRING) > ::Gem::Version.new(Constants::RAILS_6_0)
-        #   expect(real_query)
-        #           .to match(%r{LEFT OUTER JOIN articles ON (\('default_scope' = 'default_scope'\) AND )?articles.person_id = parents_people.id})
-        #   expect(real_query)
-        #           .to match(%r{LEFT OUTER JOIN articles articles_people ON (\('default_scope' = 'default_scope'\) AND )?articles_people.person_id = people.id})
-        # else
-        #   expect(real_query)
-        #           .to match(%r{LEFT OUTER JOIN articles ON (\('default_scope' = 'default_scope'\) AND )?articles.person_id = people.id})
-        #   expect(real_query)
-        #           .to match(%r{LEFT OUTER JOIN articles articles_people ON (\('default_scope' = 'default_scope'\) AND )?articles_people.person_id = parents_people.id})
-        # end
-        pending("Previous test is breaking from Malik. How did this get merge?")
+        expect(real_query)
+                .to match(%r{LEFT OUTER JOIN articles ON (\('default_scope' = 'default_scope'\) AND )?articles.person_id = people.id})
+        expect(real_query)
+                .to match(%r{LEFT OUTER JOIN articles articles_people ON (\('default_scope' = 'default_scope'\) AND )?articles_people.person_id = parents_people.id})
 
         expect(real_query)
           .to include "people.name = 'person_name_query'"
@@ -356,6 +438,7 @@ module Ransack
         s = Search.new(Note, notable_of_Person_type_name_eq: 'Ernie').result
         expect(s).to be_an ActiveRecord::Relation
         expect(s.to_sql).to match /#{people_name_field} = 'Ernie'/
+        expect(s.to_sql).to match /#{notable_type_field} = 'Person'/
       end
 
       it 'evaluates nested conditions' do
@@ -448,87 +531,168 @@ module Ransack
         expect(sort.dir).to eq 'asc'
       end
 
-      it 'creates sorts based on multiple attributes/directions in array format' do
-        @s.sorts = ['id desc', { name: 'name', dir: 'asc' }]
+      it 'creates sorts based on a single alias/direction' do
+        @s.sorts = 'daddy desc'
+        expect(@s.sorts.size).to eq(1)
+        sort = @s.sorts.first
+        expect(sort).to be_a Nodes::Sort
+        expect(sort.name).to eq 'parent_name'
+        expect(sort.dir).to eq 'desc'
+      end
+
+      it 'creates sorts based on a single alias and uppercase direction' do
+        @s.sorts = 'daddy DESC'
+        expect(@s.sorts.size).to eq(1)
+        sort = @s.sorts.first
+        expect(sort).to be_a Nodes::Sort
+        expect(sort.name).to eq 'parent_name'
+        expect(sort.dir).to eq 'desc'
+      end
+
+      it 'creates sorts based on a single alias and without direction' do
+        @s.sorts = 'daddy'
+        expect(@s.sorts.size).to eq(1)
+        sort = @s.sorts.first
+        expect(sort).to be_a Nodes::Sort
+        expect(sort.name).to eq 'parent_name'
+        expect(sort.dir).to eq 'asc'
+      end
+
+      it 'creates sorts based on attributes, alias and directions in array format' do
+        @s.sorts = ['id desc', { name: 'daddy', dir: 'asc' }]
         expect(@s.sorts.size).to eq(2)
         sort1, sort2 = @s.sorts
         expect(sort1).to be_a Nodes::Sort
         expect(sort1.name).to eq 'id'
         expect(sort1.dir).to eq 'desc'
         expect(sort2).to be_a Nodes::Sort
-        expect(sort2.name).to eq 'name'
+        expect(sort2.name).to eq 'parent_name'
         expect(sort2.dir).to eq 'asc'
       end
 
-      it 'creates sorts based on multiple attributes and uppercase directions in array format' do
-        @s.sorts = ['id DESC', { name: 'name', dir: 'ASC' }]
+      it 'creates sorts based on attributes, alias and uppercase directions in array format' do
+        @s.sorts = ['id DESC', { name: 'daddy', dir: 'ASC' }]
         expect(@s.sorts.size).to eq(2)
         sort1, sort2 = @s.sorts
         expect(sort1).to be_a Nodes::Sort
         expect(sort1.name).to eq 'id'
         expect(sort1.dir).to eq 'desc'
         expect(sort2).to be_a Nodes::Sort
-        expect(sort2.name).to eq 'name'
+        expect(sort2.name).to eq 'parent_name'
         expect(sort2.dir).to eq 'asc'
       end
 
-      it 'creates sorts based on multiple attributes and different directions
+      it 'creates sorts based on attributes, alias and different directions
         in array format' do
-        @s.sorts = ['id DESC', { name: 'name', dir: nil }]
+        @s.sorts = ['id DESC', { name: 'daddy', dir: nil }]
         expect(@s.sorts.size).to eq(2)
         sort1, sort2 = @s.sorts
         expect(sort1).to be_a Nodes::Sort
         expect(sort1.name).to eq 'id'
         expect(sort1.dir).to eq 'desc'
         expect(sort2).to be_a Nodes::Sort
-        expect(sort2.name).to eq 'name'
+        expect(sort2.name).to eq 'parent_name'
         expect(sort2.dir).to eq 'asc'
       end
 
-      it 'creates sorts based on multiple attributes/directions in hash format' do
+      it 'creates sorts based on attributes, alias and directions in hash format' do
         @s.sorts = {
           '0' => { name: 'id', dir: 'desc' },
-          '1' => { name: 'name', dir: 'asc' }
+          '1' => { name: 'daddy', dir: 'asc' }
         }
         expect(@s.sorts.size).to eq(2)
         expect(@s.sorts).to be_all { |s| Nodes::Sort === s }
         id_sort = @s.sorts.detect { |s| s.name == 'id' }
-        name_sort = @s.sorts.detect { |s| s.name == 'name' }
+        daddy_sort = @s.sorts.detect { |s| s.name == 'parent_name' }
         expect(id_sort.dir).to eq 'desc'
-        expect(name_sort.dir).to eq 'asc'
+        expect(daddy_sort.dir).to eq 'asc'
       end
 
-      it 'creates sorts based on multiple attributes and uppercase directions
+      it 'creates sorts based on attributes, alias and uppercase directions
         in hash format' do
         @s.sorts = {
           '0' => { name: 'id', dir: 'DESC' },
-          '1' => { name: 'name', dir: 'ASC' }
+          '1' => { name: 'daddy', dir: 'ASC' }
         }
         expect(@s.sorts.size).to eq(2)
         expect(@s.sorts).to be_all { |s| Nodes::Sort === s }
         id_sort = @s.sorts.detect { |s| s.name == 'id' }
-        name_sort = @s.sorts.detect { |s| s.name == 'name' }
+        daddy_sort = @s.sorts.detect { |s| s.name == 'parent_name' }
         expect(id_sort.dir).to eq 'desc'
-        expect(name_sort.dir).to eq 'asc'
+        expect(daddy_sort.dir).to eq 'asc'
       end
 
-      it 'creates sorts based on multiple attributes and different directions
+      it 'creates sorts based on attributes, alias and different directions
         in hash format' do
         @s.sorts = {
           '0' => { name: 'id', dir: 'DESC' },
-          '1' => { name: 'name', dir: nil }
+          '1' => { name: 'daddy', dir: nil }
         }
         expect(@s.sorts.size).to eq(2)
         expect(@s.sorts).to be_all { |s| Nodes::Sort === s }
         id_sort = @s.sorts.detect { |s| s.name == 'id' }
-        name_sort = @s.sorts.detect { |s| s.name == 'name' }
+        daddy_sort = @s.sorts.detect { |s| s.name == 'parent_name' }
         expect(id_sort.dir).to eq 'desc'
-        expect(name_sort.dir).to eq 'asc'
+        expect(daddy_sort.dir).to eq 'asc'
       end
 
       it 'overrides existing sort' do
         @s.sorts = 'id asc'
         expect(@s.result.first.id).to eq 1
+      end
+
+      it "PG's sort option", if: ::ActiveRecord::Base.connection.adapter_name == "PostgreSQL" do
+        default = Ransack.options.clone
+
+        s = Search.new(Person, s: 'name asc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" ASC"
+
+        Ransack.configure { |c| c.postgres_fields_sort_option = :nulls_first }
+        s = Search.new(Person, s: 'name asc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" ASC NULLS FIRST"
+        s = Search.new(Person, s: 'name desc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" DESC NULLS LAST"
+
+        Ransack.configure { |c| c.postgres_fields_sort_option = :nulls_last }
+        s = Search.new(Person, s: 'name asc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" ASC NULLS LAST"
+        s = Search.new(Person, s: 'name desc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" DESC NULLS FIRST"
+
+        Ransack.options = default
+      end
+
+      it "PG's sort option with double name", if: ::ActiveRecord::Base.connection.adapter_name == "PostgreSQL" do
+        default = Ransack.options.clone
+
+        s = Search.new(Person, s: 'doubled_name asc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" || \"people\".\"name\" ASC"
+
+        Ransack.configure { |c| c.postgres_fields_sort_option = :nulls_first }
+        s = Search.new(Person, s: 'doubled_name asc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" || \"people\".\"name\" ASC NULLS FIRST"
+        s = Search.new(Person, s: 'doubled_name desc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" || \"people\".\"name\" DESC NULLS LAST"
+
+        Ransack.configure { |c| c.postgres_fields_sort_option = :nulls_last }
+        s = Search.new(Person, s: 'doubled_name asc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" || \"people\".\"name\" ASC NULLS LAST"
+        s = Search.new(Person, s: 'doubled_name desc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" || \"people\".\"name\" DESC NULLS FIRST"
+
+        Ransack.configure { |c| c.postgres_fields_sort_option = :nulls_always_first }
+        s = Search.new(Person, s: 'doubled_name asc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" || \"people\".\"name\" ASC NULLS FIRST"
+        s = Search.new(Person, s: 'doubled_name desc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" || \"people\".\"name\" DESC NULLS FIRST"
+
+        Ransack.configure { |c| c.postgres_fields_sort_option = :nulls_always_last }
+        s = Search.new(Person, s: 'doubled_name asc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" || \"people\".\"name\" ASC NULLS LAST"
+        s = Search.new(Person, s: 'doubled_name desc')
+        expect(s.result.to_sql).to eq "SELECT \"people\".* FROM \"people\" ORDER BY \"people\".\"name\" || \"people\".\"name\" DESC NULLS LAST"
+
+        Ransack.options = default
       end
     end
 

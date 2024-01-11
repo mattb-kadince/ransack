@@ -2,7 +2,7 @@ module Ransack
   module Nodes
     class Value < Node
       attr_accessor :value
-      delegate :present?, :blank?, :to => :value
+      delegate :present?, :blank?, to: :value
 
       def initialize(context, value = nil)
         super(context)
@@ -26,7 +26,7 @@ module Ransack
         case type
         when :date
           cast_to_date(value)
-        when :datetime, :timestamp, :time
+        when :datetime, :timestamp, :time, :timestamptz
           cast_to_time(value)
         when :boolean
           cast_to_boolean(value)
@@ -50,7 +50,7 @@ module Ransack
           y, m, d = *[val].flatten
           m ||= 1
           d ||= 1
-          Date.new(y,m,d) rescue nil
+          Date.new(y, m, d) rescue nil
         end
       end
 

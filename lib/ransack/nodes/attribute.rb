@@ -5,8 +5,8 @@ module Ransack
 
       attr_reader :name, :ransacker_args
 
-      delegate :blank?, :present?, :to => :name
-      delegate :engine, :to => :context
+      delegate :blank?, :present?, to: :name
+      delegate :engine, to: :context
 
       def initialize(context, name = nil, ransacker_args = [])
         super(context)
@@ -30,7 +30,7 @@ module Ransack
 
       def type
         if ransacker
-          return ransacker.type
+          ransacker.type
         else
           context.type_for(self)
         end

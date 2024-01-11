@@ -33,7 +33,7 @@ module Ransack
         text = args.first
         i18n = options[:i18n] || {}
         text ||= object.translate(
-          method, i18n.reverse_merge(:include_associations => true)
+          method, i18n.reverse_merge(include_associations: true)
           ) if object.respond_to? :translate
         super(method, text, options, &block)
       end
@@ -45,9 +45,9 @@ module Ransack
       end
 
       def attribute_select(options = nil, html_options = nil, action = nil)
-        options = options || {}
-        html_options = html_options || {}
-        action = action || Constants::SEARCH
+        options ||= {}
+        html_options ||= {}
+        action ||= Constants::SEARCH
         default = options.delete(:default)
         raise ArgumentError, formbuilder_error_message(
           "#{action}_select") unless object.respond_to?(:context)
@@ -240,7 +240,7 @@ module Ransack
       def get_attribute_element(action, base)
         begin
           [
-            Translate.association(base, :context => object.context),
+            Translate.association(base, context: object.context),
             collection_for_base(action, base)
           ]
         rescue UntraversableAssociationError
@@ -253,7 +253,7 @@ module Ransack
           [
             attr_from_base_and_column(base, c),
             Translate.attribute(
-              attr_from_base_and_column(base, c), :context => object.context
+              attr_from_base_and_column(base, c), context: object.context
             )
           ]
         end

@@ -27,14 +27,16 @@ module Ransack
     self.predicates = PredicateCollection.new
 
     self.options = {
-      :search_key => :q,
-      :ignore_unknown_conditions => true,
-      :hide_sort_order_indicators => false,
-      :up_arrow => '&#9660;'.freeze,
-      :down_arrow => '&#9650;'.freeze,
-      :default_arrow => nil,
+      search_key: :q,
+      ignore_unknown_conditions: true,
+      hide_sort_order_indicators: false,
+      up_arrow: '&#9660;'.freeze,
+      down_arrow: '&#9650;'.freeze,
+      default_arrow: nil,
+      sanitize_scope_args: true,
+      postgres_fields_sort_option: nil,
+      strip_whitespace: true,
       :remove_association_no_negative_assoc => true,
-      :sanitize_scope_args => true
     }
 
     def configure
@@ -54,11 +56,11 @@ module Ransack
         compound_name = name + suffix
         self.predicates[compound_name] = Predicate.new(
           opts.merge(
-            :name => compound_name,
-            :arel_predicate => arel_predicate_with_suffix(
+            name: compound_name,
+            arel_predicate: arel_predicate_with_suffix(
               opts[:arel_predicate], suffix
               ),
-            :compound => true
+            compound: true
           )
         )
       end if compounds
@@ -98,6 +100,19 @@ module Ransack
     #
     def ignore_unknown_conditions=(boolean)
       self.options[:ignore_unknown_conditions] = boolean
+    end
+
+    # By default Ransack ignores empty predicates. Ransack can also fallback to
+    # a default predicate by setting it in an initializer file
+    # like `config/initializers/ransack.rb` as follows:
+    #
+    # Ransack.configure do |config|
+    #   # Use the 'eq' predicate if an unknown predicate is passed
+    #   config.default_predicate = 'eq'
+    # end
+    #
+    def default_predicate=(name)
+      self.options[:default_predicate] = name
     end
 
     # By default, Ransack displays sort order indicator arrows with HTML codes:
@@ -142,6 +157,21 @@ module Ransack
       self.options[:sanitize_scope_args] = boolean
     end
 
+    # The `NULLS FIRST` and `NULLS LAST` options can be used to determine
+    # whether nulls appear before or after non-null values in the sort ordering.
+    #
+    # User may want to configure it like this:
+    #
+    # Ransack.configure do |c|
+    #   c.postgres_fields_sort_option = :nulls_first # or e.g. :nulls_always_last
+    # end
+    #
+    # See this feature: https://www.postgresql.org/docs/13/queries-order.html
+    #
+    def postgres_fields_sort_option=(setting)
+      self.options[:postgres_fields_sort_option] = setting
+    end
+
     # By default, Ransack displays sort order indicator arrows in sort links.
     # The default may be globally overridden in an initializer file like
     # `config/initializers/ransack.rb` as follows:
@@ -153,6 +183,19 @@ module Ransack
     #
     def hide_sort_order_indicators=(boolean)
       self.options[:hide_sort_order_indicators] = boolean
+    end
+
+    # By default, Ransack displays strips all whitespace when searching for a string.
+    # The default may be globally changed in an initializer file like
+    # `config/initializers/ransack.rb` as follows:
+    #
+    # Ransack.configure do |config|
+    #   # Enable whitespace stripping for string searches
+    #   config.strip_whitespace = true
+    # end
+    #
+    def strip_whitespace=(boolean)
+      self.options[:strip_whitespace] = boolean
     end
 
     # By default, associations are removed from join dependencies when using negative predicates.
