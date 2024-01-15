@@ -36,7 +36,7 @@ module Ransack
       sanitize_scope_args: true,
       postgres_fields_sort_option: nil,
       strip_whitespace: true,
-      :remove_association_no_negative_assoc => true,
+      remove_association_no_negative_assoc: true,
     }
 
     def configure
