@@ -298,6 +298,11 @@ module Ransack
                 replace_gsub = ['does_not_match', 'matches']
               end
               query = context.klass.ransack("#{attribute.name}_#{self.predicate.name.gsub(*replace_gsub)}" => self.value).result.select(:id)
+
+              # Add comments_id to top level query
+              # Select id from subquery
+
+              # query.where(format_predicate(attribute).not)
               Arel::Nodes::NotIn.new(context.primary_key, Arel.sql(query.to_sql))
             end
           else
@@ -343,7 +348,7 @@ module Ransack
       end
 
       def casted_array?(predicate)
-        predicate.value.is_a?(Array) && predicate.is_a?(Arel::Nodes::Casted)
+        predicate.is_a?(Arel::Nodes::Casted) && predicate.value.is_a?(Array)
       end
 
       def format_values_for(predicate)
